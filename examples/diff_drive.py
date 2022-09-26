@@ -11,7 +11,7 @@ np.random.seed(SEED)
 class SimpleController:
     def __init__(self):
 
-        self.ctrl_gains = np.array([10, 0.01, 10]) / 10
+        self.ctrl_gains = np.array([5, 0.01, 5]) / 10
 
     @property
     def k_x(self):
@@ -51,23 +51,15 @@ class DiffDrive:
         self._ctrl_dim = 2
 
         if state_interval is not None:
+            assert (
+                len(state_interval) == self._state_dim
+            ), f"State interval should have {self._state_dim} dimensions"
             self.state_interval = state_interval
         else:
             MAX_X = MAX_Y = 5
             ub = np.array([MAX_X, MAX_Y, 2 * np.pi]).reshape((-1, 1))
             self.state_interval = np.hstack((-ub, ub))
-        if ctrl_interval is not None:
-            self.ctrl_interval = ctrl_interval
-        else:
-            MAX_U = 1
-            ub = np.array([MAX_U, MAX_U]).reshape((-1, 1))
-            self.ctrl_interval = np.hstack((-ub, ub))
-
-        self.controller = SimpleController()
-
-        if controller is not None:
-            self.controller = controller
-
+        
         if init_state is not None:
             assert (
                 len(init_state) == self._state_dim
@@ -77,6 +69,21 @@ class DiffDrive:
             self.state = np.random.uniform(
                 low=self.state_interval[:, 0], high=self.state_interval[:, 1]
             ).reshape((-1, 1))
+
+        if ctrl_interval is not None:
+            assert (
+                len(ctrl_interval) == self._ctrl_dim
+            ), f"Control interval should have {self._ctrl_dim} dimensions"
+            self.ctrl_interval = ctrl_interval
+        else:
+            MAX_U = 1
+            ub = np.array([MAX_U, MAX_U]).reshape((-1, 1))
+            self.ctrl_interval = np.hstack((-ub, ub))
+
+        if controller is not None:
+            self.controller = controller
+        else:
+            self.controller = SimpleController()
 
         self.Ts = sampling_time
 
@@ -116,6 +123,7 @@ class DiffDrive:
     def compute_Lip_bounds(self, ref_pt):
         # Need to compute bounds on Kx, Ku, Kpsi
 
+        # K_u Lipschitz constant of the dynamics w.r.t u
         # \nabla_u f(x,u) =
         # [-1,   e_y]
         # [ 0,  -e_x]
@@ -136,8 +144,7 @@ class DiffDrive:
         K_x = 2 * max(a12, abs(v_ref)).item()
 
         # K_psi depends on control gains, ref point, and bounds on states
-
-        # K_x Lipschitz constant of the dynamics w.r.t x
+        # K_psi Lipschitz constant of the U w.r.t x
         # \nabla_x U =
         # [k_x,              0,                                              0        ]
         # [0,        k_y * v_ref * sin(e_phi)/e_phi,      k_y * v_ref *e_y * (e_phi * cos(e_phi) - sin(e_phi)) / e_phi^2]
@@ -156,7 +163,7 @@ class DiffDrive:
 if __name__ == "__main__":
 
     q = np.array([1.1, 0.8, 0]).reshape((-1, 1))
-    q_ref = 2 * np.array([2, 2.4, -0.25]).reshape((-1, 1))
+    q_ref = np.array([2, 2.4, -0.25]).reshape((-1, 1))
     q_diff = q_ref - q
     v_ref = np.sqrt(q_diff[0] ** 2 + q_diff[1] ** 2)
     w_ref = 0.5
