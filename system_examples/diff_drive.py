@@ -2,6 +2,10 @@ import numpy as np
 from typing import Callable
 import matplotlib.pyplot as plt
 
+import sys
+sys.path.append("/home/hkhedr/Haitham/projects/TLLnet/")
+from utils.utils import compute_mu, diff_drive_delta_tau
+
 SEED = 1351
 EPS = 1e-10
 
@@ -9,9 +13,10 @@ np.random.seed(SEED)
 
 
 class SimpleController:
+
     def __init__(self):
 
-        self.ctrl_gains = np.array([5, 0.01, 5]) / 10
+        self.ctrl_gains = np.array([10, 50, 10]) /10
 
     @property
     def k_x(self):
@@ -56,7 +61,7 @@ class DiffDrive:
             ), f"State interval should have {self._state_dim} dimensions"
             self.state_interval = state_interval
         else:
-            MAX_X = MAX_Y = 5
+            MAX_X = MAX_Y = 2
             ub = np.array([MAX_X, MAX_Y, 2 * np.pi]).reshape((-1, 1))
             self.state_interval = np.hstack((-ub, ub))
         
@@ -86,6 +91,11 @@ class DiffDrive:
             self.controller = SimpleController()
 
         self.Ts = sampling_time
+
+
+    @property
+    def state_dim(self):
+        return self._state_dim
 
     def step(self, ref_vel, time_steps=1):
         trace = {"state": [], "control": [], "V": []}
@@ -131,7 +141,8 @@ class DiffDrive:
 
         ex_ub = max(np.abs(self.state_interval[0, :]))
         ey_ub = max(np.abs(self.state_interval[1, :]))
-        K_u = 2 * max(1, ey_ub, ex_ub)
+        # K_u = 2 * max(1, ey_ub, ex_ub)
+        K_u = np.sqrt(2 + ey_ub ** 2 + ex_ub ** 2).item()
 
         # K_x Lipschitz constant of the dynamics w.r.t x
         # \nabla_x f(x,u) =
@@ -141,7 +152,8 @@ class DiffDrive:
 
         v_ref, w_ref = ref_pt
         a12 = max(np.abs(w_ref + self.ctrl_interval[1, :]))
-        K_x = 2 * max(a12, abs(v_ref)).item()
+        # K_x = np.sqrt(3) * max(a12, abs(v_ref)).item()
+        K_x = np.sqrt(2*a12 + v_ref**2).item()
 
         # K_psi depends on control gains, ref point, and bounds on states
         # K_psi Lipschitz constant of the U w.r.t x
@@ -153,20 +165,22 @@ class DiffDrive:
         a22 = abs(self.controller.k_y * v_ref)
         a23 = abs(
             self.controller.k_phi
-            + self.controller.k_y * v_ref * self.state_interval[1, 1] * 0.5
+            + self.controller.k_y * v_ref * max(np.abs(self.state_interval[1, :])) * 0.5
         )
-        K_psi = 2 * max(a11, a22, a23).item()
+        # K_psi = np.sqrt(3) * max(a11, a22, a23).item()
+        K_psi = np.sqrt(self.controller.k_x**2 + a22**2 + a23**2).item()
 
         return (K_x, K_u, K_psi)
 
-
+    
 if __name__ == "__main__":
 
     q = np.array([1.1, 0.8, 0]).reshape((-1, 1))
     q_ref = np.array([2, 2.4, -0.25]).reshape((-1, 1))
     q_diff = q_ref - q
-    v_ref = np.sqrt(q_diff[0] ** 2 + q_diff[1] ** 2)
-    w_ref = 0.5
+    # v_ref = np.sqrt(q_diff[0] ** 2 + q_diff[1] ** 2)
+    v_ref = 2
+    w_ref = 0.1
     ref_vel = (v_ref, w_ref)
     Ts = 0.01
     diff_drive = DiffDrive(init_state=q_diff, sampling_time=Ts)
@@ -181,5 +195,11 @@ if __name__ == "__main__":
     plt.legend()
     plt.savefig("error")
 
-    print(diff_drive.compute_Lip_bounds(ref_vel))
+    K_x, K_u, K_psi = diff_drive.compute_Lip_bounds(ref_vel)
+    print(K_x, K_u, K_psi)
+
+    delta = 0.00001
+    epsilon = 1.0
+    tau = diff_drive_delta_tau(diff_drive, ref_vel, delta, epsilon)
+    mu = compute_mu(diff_drive, (K_x, K_u, K_psi), delta, tau)
     pass
